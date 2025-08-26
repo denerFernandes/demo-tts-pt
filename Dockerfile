@@ -55,7 +55,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir git+https://github.com/SWivid/F5-TTS.git || echo "F5-TTS não disponível - usando simulação"
 
 # Copiar código da aplicação
-COPY server-gpu.py server.py
+COPY server.py server.py
 
 # Criar usuário não-root (mas manter acesso GPU)
 RUN useradd -m -u 1000 -G video appuser && \
