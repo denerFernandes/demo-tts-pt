@@ -40,7 +40,7 @@ WORKDIR /app
 RUN mkdir -p /app/models /app/temp /app/cache
 
 # Copiar requirements
-COPY requirements-gpu.txt requirements.txt
+COPY requirements.txt requirements.txt
 
 # Atualizar pip
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
