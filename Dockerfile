@@ -95,11 +95,11 @@ RUN chmod +x /app/check_gpu.py
 USER appuser
 
 # Expor porta
-EXPOSE 5000
+EXPOSE 8000
 
 # Health check com verificação GPU
 HEALTHCHECK --interval=30s --timeout=30s --start-period=90s --retries=3 \
-    CMD python /app/check_gpu.py && curl -f http://localhost:5000/health || exit 1
+    CMD python /app/check_gpu.py && curl -f http://localhost:8000/health || exit 1
 
 # Verificar GPU na inicialização e iniciar servidor
 CMD ["sh", "-c", "python /app/check_gpu.py && python server.py"]
