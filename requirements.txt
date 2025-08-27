@@ -1,6 +1,5 @@
 # Core ML
-torch>=2.0.0
-torchaudio>=2.0.0
+# torch and torchaudio are installed in the Dockerfile
 transformers>=4.30.0
 
 # Audio processing
@@ -12,6 +11,7 @@ numpy>=1.24.0
 # Web server
 flask>=2.3.0
 werkzeug>=2.3.0
+click>=8.1.7
 
 # HuggingFace
 huggingface-hub>=0.16.0
@@ -20,3 +20,7 @@ accelerate>=0.20.0
 # Utils
 requests>=2.31.0
 tqdm>=4.65.0
+cached-path>=1.6.2
+
+# F5-TTS
+f5-tts @ git+https://github.com/SWivid/F5-TTS.git

@@ -46,8 +46,18 @@ COPY requirements.txt requirements.txt
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
     pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir git+https://github.com/SWivid/F5-TTS.git && \
+    echo "Installing F5-TTS..." && \
+    pip install --no-cache-dir --force-reinstall --no-deps git+https://github.com/SWivid/F5-TTS.git && \
+    echo "F5-TTS installation complete." && \
+    echo "Listing f5_tts library contents:" && \
+    pip show f5-tts && \
+    ls -l $(pip show f5-tts | grep Location | awk '{print $2}')/f5_tts && \
     rm -rf /root/.cache/pip
+
+# Verificar permissões e conectividade
+RUN ls -ld /app && ls -ld /app/models
+RUN ping -c 1 huggingface.co
+RUN pip check
 
 
 
