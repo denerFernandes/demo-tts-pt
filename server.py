@@ -46,7 +46,7 @@ class GPUOptimizedF5TTSServer:
         os.makedirs("/app/temp", exist_ok=True)
         
         # Baixar modelo na inicialização
-        self.download_model()
+        self.load_model()
     
     def setup_device(self):
         """Configurar dispositivo com verificações detalhadas"""
@@ -121,63 +121,27 @@ class GPUOptimizedF5TTSServer:
             gc.collect()
             logger.info("🧹 Memória GPU limpa")
     
-    def download_model(self):
-        """Download do modelo do HuggingFace"""
-        try:
-            logger.info(f"📥 Baixando modelo: {self.model_name}")
-            
-            # Tentar download do snapshot completo
-            try:
-                model_path = snapshot_download(
-                    repo_id=self.model_name,
-                    local_dir=self.model_dir,
-                    local_dir_use_symlinks=False
-                )
-                logger.info(f"✅ Modelo baixado em: {model_path}")
-                
-            except Exception as e:
-                logger.warning(f"Erro no snapshot download: {e}")
-                logger.info("Tentando download individual de arquivos...")
-                
-                # Lista de arquivos essenciais
-                files_to_download = [
-                    "config.json",
-                    "model.safetensors", 
-                    "pytorch_model.bin",
-                    "tokenizer.json",
-                    "vocab.json"
-                ]
-                
-                for filename in files_to_download:
-                    try:
-                        file_path = hf_hub_download(
-                            repo_id=self.model_name,
-                            filename=filename,
-                            local_dir=self.model_dir,
-                            local_dir_use_symlinks=False
-                        )
-                        logger.info(f"📦 Baixado: {filename}")
-                    except Exception as file_error:
-                        logger.warning(f"Não foi possível baixar {filename}: {file_error}")
-            
-            self.load_model()
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao baixar modelo: {e}")
-            logger.warning("🔄 Usando modo simulação")
+    
     
     
     
     def load_model(self):
         """Carrega o modelo F5-TTS com otimizações GPU"""
         try:
+            from f5_tts import F5TTS
             logger.info("🔄 Carregando modelo...")
             
+            if not os.path.exists(self.model_dir) or not os.listdir(self.model_dir):
+                logger.info(f"📥 Modelo não encontrado localmente, baixando de {self.model_name}...")
+                snapshot_download(
+                    repo_id=self.model_name,
+                    local_dir=self.model_dir,
+                    local_dir_use_symlinks=False
+                )
+                logger.info("✅ Modelo baixado com sucesso!")
+
             # Limpar memória antes de carregar
             self.clear_gpu_memory()
-            
-            # IMPLEMENTAÇÃO REAL: Descomente quando F5-TTS estiver disponível
-            from f5_tts import F5TTS
             
             # Configurar dtype baseado na GPU
             if self.device == "cuda":
@@ -201,9 +165,6 @@ class GPUOptimizedF5TTSServer:
                 self.model = torch.compile(self.model, mode="reduce-overhead")
                 logger.info("⚡ Modelo compilado com torch.compile")
             
-            # Para demonstração, usar placeholder
-            # self.model = "placeholder_model_gpu"
-            
             # Log de memória após carregamento
             if self.model and self.device == "cuda":
                 memory_info = self.get_gpu_memory_info()
@@ -215,9 +176,15 @@ class GPUOptimizedF5TTSServer:
             else:
                 logger.error("❌ Modelo não pode ser carregado.")
             
+        except ImportError:
+            logger.error("❌ Biblioteca F5-TTS não encontrada. Instale com: pip install git+https://github.com/SWivid/F5-TTS.git")
+            self.model = None
         except Exception as e:
             logger.error(f"❌ Erro ao carregar modelo: {e}")
-            logger.error(f"Arquivos no diretório do modelo: {os.listdir(self.model_dir)}")
+            if os.path.exists(self.model_dir):
+                logger.error(f"Arquivos no diretório do modelo: {os.listdir(self.model_dir)}")
+            else:
+                logger.error("Diretório do modelo não encontrado.")
             self.model = None
     
     def preprocess_audio_gpu(self, audio_file: str) -> torch.Tensor:
