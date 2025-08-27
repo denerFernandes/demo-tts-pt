@@ -56,7 +56,6 @@ RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
 
 # Verificar permissões e conectividade
 RUN ls -ld /app && ls -ld /app/models
-RUN ping -c 1 huggingface.co
 RUN pip check
 
 
