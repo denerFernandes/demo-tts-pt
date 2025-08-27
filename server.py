@@ -46,7 +46,7 @@ class GPUOptimizedF5TTSServer:
         os.makedirs("/app/temp", exist_ok=True)
         
         # Baixar modelo na inicialização
-        self.download_model()
+        self.load_model()
     
     def setup_device(self):
         """Configurar dispositivo com verificações detalhadas"""
@@ -97,17 +97,21 @@ class GPUOptimizedF5TTSServer:
     def get_gpu_memory_info(self):
         """Obter informações de memória GPU"""
         if self.device == "cuda":
-            allocated = torch.cuda.memory_allocated(0) / (1024**3)
-            reserved = torch.cuda.memory_reserved(0) / (1024**3)
-            total = self.gpu_memory
-            
-            return {
-                'allocated_gb': round(allocated, 2),
-                'reserved_gb': round(reserved, 2),
-                'total_gb': round(total, 2),
-                'free_gb': round(total - reserved, 2),
-                'usage_percent': round((reserved / total) * 100, 1)
-            }
+            try:
+                allocated = torch.cuda.memory_allocated(0) / (1024**3)
+                reserved = torch.cuda.memory_reserved(0) / (1024**3)
+                total = self.gpu_memory
+                
+                return {
+                    'allocated_gb': round(allocated, 2),
+                    'reserved_gb': round(reserved, 2),
+                    'total_gb': round(total, 2),
+                    'free_gb': round(total - reserved, 2),
+                    'usage_percent': round((reserved / total) * 100, 1)
+                }
+            except Exception as e:
+                logger.warning(f"Não foi possível obter informações da memória da GPU: {e}")
+                return None
         return None
     
     def clear_gpu_memory(self):
@@ -117,50 +121,7 @@ class GPUOptimizedF5TTSServer:
             gc.collect()
             logger.info("🧹 Memória GPU limpa")
     
-    def download_model(self):
-        """Download do modelo do HuggingFace"""
-        try:
-            logger.info(f"📥 Baixando modelo: {self.model_name}")
-            
-            # Tentar download do snapshot completo
-            try:
-                model_path = snapshot_download(
-                    repo_id=self.model_name,
-                    local_dir=self.model_dir,
-                    local_dir_use_symlinks=False
-                )
-                logger.info(f"✅ Modelo baixado em: {model_path}")
-                
-            except Exception as e:
-                logger.warning(f"Erro no snapshot download: {e}")
-                logger.info("Tentando download individual de arquivos...")
-                
-                # Lista de arquivos essenciais
-                files_to_download = [
-                    "config.json",
-                    "model.safetensors", 
-                    "pytorch_model.bin",
-                    "tokenizer.json",
-                    "vocab.json"
-                ]
-                
-                for filename in files_to_download:
-                    try:
-                        file_path = hf_hub_download(
-                            repo_id=self.model_name,
-                            filename=filename,
-                            local_dir=self.model_dir,
-                            local_dir_use_symlinks=False
-                        )
-                        logger.info(f"📦 Baixado: {filename}")
-                    except Exception as file_error:
-                        logger.warning(f"Não foi possível baixar {filename}: {file_error}")
-            
-            self.load_model()
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao baixar modelo: {e}")
-            logger.warning("🔄 Usando modo simulação")
+    
     
     def load_model(self):
         """Carrega o modelo F5-TTS com otimizações GPU"""
@@ -199,11 +160,15 @@ class GPUOptimizedF5TTSServer:
             # self.model = "placeholder_model_gpu"
             
             # Log de memória após carregamento
-            if self.device == "cuda":
+            if self.model and self.device == "cuda":
                 memory_info = self.get_gpu_memory_info()
-                logger.info(f"📊 Memória GPU após carregamento: {memory_info['usage_percent']}% usada")
+                if memory_info:
+                    logger.info(f"📊 Memória GPU após carregamento: {memory_info['usage_percent']}% usada")
             
-            logger.info("✅ Modelo carregado com sucesso!")
+            if self.model:
+                logger.info("✅ Modelo carregado com sucesso!")
+            else:
+                logger.error("❌ Modelo não pode ser carregado.")
             
         except Exception as e:
             logger.error(f"❌ Erro ao carregar modelo: {e}")
