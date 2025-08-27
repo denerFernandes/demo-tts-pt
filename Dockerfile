@@ -49,14 +49,10 @@ RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir git+https://github.com/SWivid/F5-TTS.git && \
     rm -rf /root/.cache/pip
 
-# Copiar script de download e baixar modelo
-COPY download_model.py download_model.py
-RUN python download_model.py
-RUN chown -R appuser:appuser /app/models
+
 
 # Copiar código da aplicação
 COPY server.py server.py
-COPY run.sh run.sh
 
 # Criar usuário não-root (mas manter acesso GPU)
 RUN useradd -m -u 1000 -G video appuser && \
@@ -103,4 +99,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=90s --retries=3 \
     CMD python /app/check_gpu.py && curl -f http://localhost:8000/health || exit 1
 
 # Verificar GPU na inicialização e iniciar servidor
-CMD ["./run.sh"]
+CMD ["python", "server.py"]

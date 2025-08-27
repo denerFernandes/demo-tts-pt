@@ -46,7 +46,7 @@ class GPUOptimizedF5TTSServer:
         os.makedirs("/app/temp", exist_ok=True)
         
         # Baixar modelo na inicialização
-        self.load_model()
+        self.download_model()
     
     def setup_device(self):
         """Configurar dispositivo com verificações detalhadas"""
@@ -120,6 +120,51 @@ class GPUOptimizedF5TTSServer:
             torch.cuda.empty_cache()
             gc.collect()
             logger.info("🧹 Memória GPU limpa")
+    
+    def download_model(self):
+        """Download do modelo do HuggingFace"""
+        try:
+            logger.info(f"📥 Baixando modelo: {self.model_name}")
+            
+            # Tentar download do snapshot completo
+            try:
+                model_path = snapshot_download(
+                    repo_id=self.model_name,
+                    local_dir=self.model_dir,
+                    local_dir_use_symlinks=False
+                )
+                logger.info(f"✅ Modelo baixado em: {model_path}")
+                
+            except Exception as e:
+                logger.warning(f"Erro no snapshot download: {e}")
+                logger.info("Tentando download individual de arquivos...")
+                
+                # Lista de arquivos essenciais
+                files_to_download = [
+                    "config.json",
+                    "model.safetensors", 
+                    "pytorch_model.bin",
+                    "tokenizer.json",
+                    "vocab.json"
+                ]
+                
+                for filename in files_to_download:
+                    try:
+                        file_path = hf_hub_download(
+                            repo_id=self.model_name,
+                            filename=filename,
+                            local_dir=self.model_dir,
+                            local_dir_use_symlinks=False
+                        )
+                        logger.info(f"📦 Baixado: {filename}")
+                    except Exception as file_error:
+                        logger.warning(f"Não foi possível baixar {filename}: {file_error}")
+            
+            self.load_model()
+            
+        except Exception as e:
+            logger.error(f"❌ Erro ao baixar modelo: {e}")
+            logger.warning("🔄 Usando modo simulação")
     
     
     
