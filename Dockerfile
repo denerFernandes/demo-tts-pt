@@ -49,6 +49,11 @@ RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir git+https://github.com/SWivid/F5-TTS.git && \
     rm -rf /root/.cache/pip
 
+# Copiar script de download e baixar modelo
+COPY download_model.py download_model.py
+RUN python download_model.py
+RUN chown -R appuser:appuser /app/models
+
 # Copiar código da aplicação
 COPY server.py server.py
 COPY run.sh run.sh

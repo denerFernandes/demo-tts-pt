@@ -172,6 +172,7 @@ class GPUOptimizedF5TTSServer:
             
         except Exception as e:
             logger.error(f"❌ Erro ao carregar modelo: {e}")
+            logger.error(f"Arquivos no diretório do modelo: {os.listdir(self.model_dir)}")
             self.model = None
     
     def preprocess_audio_gpu(self, audio_file: str) -> torch.Tensor:
