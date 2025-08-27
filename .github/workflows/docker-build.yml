@@ -35,6 +35,11 @@ jobs:
         sudo rm -rf /usr/share/dotnet
         sudo rm -rf /opt/ghc
         sudo rm -rf /usr/local/share/boost
+        sudo rm -rf /opt/hostedtoolcache
+        sudo rm -rf /usr/local/share/powershell
+        
+        # Clean apt cache
+        sudo rm -rf /var/lib/apt/lists/*
         
         # Clean Docker
         docker system prune -af

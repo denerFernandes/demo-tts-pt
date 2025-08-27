@@ -42,21 +42,12 @@ RUN mkdir -p /app/models /app/temp /app/cache
 # Copiar requirements
 COPY requirements.txt requirements.txt
 
-# Atualizar pip
-RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
-
-# Instalar PyTorch com CUDA
-RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-
-# Instalar outras dependências
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copiar script de download e baixar modelo
-COPY download_model.py download_model.py
-RUN python download_model.py
-
-# Tentar instalar F5-TTS
-RUN pip install --no-cache-dir git+https://github.com/SWivid/F5-TTS.git
+# Instalar dependências Python
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir git+https://github.com/SWivid/F5-TTS.git && \
+    rm -rf /root/.cache/pip
 
 # Copiar código da aplicação
 COPY server.py server.py
