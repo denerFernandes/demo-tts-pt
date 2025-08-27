@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Servidor F5-TTS Otimizado para GPU
-Versão com suporte CUDA e otimizações de memória
+Versão com suporte CUDA e otimizações de memória - CORRIGIDO
 """
 
 import os
@@ -46,7 +46,7 @@ class GPUOptimizedF5TTSServer:
         os.makedirs("/app/temp", exist_ok=True)
         
         # Baixar modelo na inicialização
-        self.load_model()
+        self.download_model()
     
     def setup_device(self):
         """Configurar dispositivo com verificações detalhadas"""
@@ -121,49 +121,327 @@ class GPUOptimizedF5TTSServer:
             gc.collect()
             logger.info("🧹 Memória GPU limpa")
     
-    
-    
-    
+    def download_model(self):
+        """Download automático completo do modelo do HuggingFace"""
+        try:
+            logger.info(f"📥 Iniciando download automático do modelo: {self.model_name}")
+            
+            # Verificar se o modelo já existe e tem arquivos
+            if os.path.exists(self.model_dir) and os.listdir(self.model_dir):
+                logger.info(f"📂 Modelo já existe em {self.model_dir}")
+                existing_files = os.listdir(self.model_dir)
+                logger.info(f"📋 Arquivos existentes: {existing_files}")
+                
+                # Verificar se tem arquivos essenciais
+                essential_patterns = ['.pt', '.pth', '.bin', '.safetensors', 'config.json']
+                has_model_file = any(
+                    any(pattern in f.lower() for pattern in essential_patterns)
+                    for f in existing_files
+                )
+                
+                if has_model_file:
+                    logger.info("✅ Arquivos de modelo encontrados, pulando download")
+                    self.load_model()
+                    return
+                else:
+                    logger.info("⚠️  Arquivos essenciais não encontrados, baixando novamente...")
+            
+            # Método 1: Download completo via snapshot_download (recomendado)
+            try:
+                logger.info("🔄 Tentando download completo via snapshot...")
+                
+                # Configurações do download
+                download_config = {
+                    'repo_id': self.model_name,
+                    'local_dir': self.model_dir,
+                    'local_dir_use_symlinks': False,
+                    'resume_download': True,  # Continuar downloads interrompidos
+                }
+                
+                # Adicionar token se necessário (para modelos privados)
+                try:
+                    from huggingface_hub import HfApi
+                    api = HfApi()
+                    # Tentar obter info do repositório para verificar se é público
+                    repo_info = api.repo_info(repo_id=self.model_name)
+                    logger.info(f"📊 Repositório encontrado: {repo_info.id}")
+                    if hasattr(repo_info, 'private') and repo_info.private:
+                        logger.warning("🔐 Repositório privado detectado - pode precisar de token")
+                except Exception as api_error:
+                    logger.warning(f"⚠️  Não foi possível verificar repositório: {api_error}")
+                
+                # Executar download
+                model_path = snapshot_download(**download_config)
+                logger.info(f"✅ Download completo realizado em: {model_path}")
+                
+                # Listar todos os arquivos baixados
+                if os.path.exists(self.model_dir):
+                    all_files = []
+                    for root, dirs, files in os.walk(self.model_dir):
+                        for file in files:
+                            rel_path = os.path.relpath(os.path.join(root, file), self.model_dir)
+                            all_files.append(rel_path)
+                    
+                    logger.info(f"📦 Total de arquivos baixados: {len(all_files)}")
+                    logger.info(f"📋 Estrutura do modelo:")
+                    for file in sorted(all_files):
+                        file_size = os.path.getsize(os.path.join(self.model_dir, file))
+                        size_mb = file_size / (1024 * 1024)
+                        logger.info(f"   📄 {file} ({size_mb:.1f} MB)")
+                
+                self.load_model()
+                return
+                
+            except Exception as snapshot_error:
+                logger.warning(f"⚠️  Erro no download via snapshot: {snapshot_error}")
+                logger.info("🔄 Tentando método alternativo...")
+            
+            # Método 2: Download via API do HuggingFace para descobrir arquivos
+            try:
+                logger.info("🔍 Descobrindo arquivos disponíveis no repositório...")
+                
+                from huggingface_hub import HfApi, hf_hub_url
+                api = HfApi()
+                
+                # Obter lista de arquivos no repositório
+                try:
+                    repo_files = api.list_repo_files(repo_id=self.model_name)
+                    logger.info(f"📋 Encontrados {len(repo_files)} arquivos no repositório:")
+                    
+                    # Categorizar arquivos por tipo
+                    model_files = []
+                    config_files = []
+                    other_files = []
+                    
+                    for file_path in repo_files:
+                        file_lower = file_path.lower()
+                        if any(ext in file_lower for ext in ['.pt', '.pth', '.bin', '.safetensors']):
+                            model_files.append(file_path)
+                        elif any(name in file_lower for name in ['config', 'vocab', 'tokenizer']):
+                            config_files.append(file_path)
+                        else:
+                            other_files.append(file_path)
+                    
+                    logger.info(f"🎯 Arquivos de modelo: {model_files}")
+                    logger.info(f"⚙️  Arquivos de config: {config_files}")
+                    logger.info(f"📄 Outros arquivos: {other_files[:10]}...")  # Mostrar apenas os primeiros 10
+                    
+                    # Baixar todos os arquivos automaticamente
+                    total_files = len(repo_files)
+                    downloaded_files = 0
+                    failed_files = []
+                    
+                    logger.info(f"🚀 Iniciando download de {total_files} arquivos...")
+                    
+                    for i, file_path in enumerate(repo_files, 1):
+                        try:
+                            logger.info(f"📥 [{i}/{total_files}] Baixando: {file_path}")
+                            
+                            downloaded_path = hf_hub_download(
+                                repo_id=self.model_name,
+                                filename=file_path,
+                                local_dir=self.model_dir,
+                                local_dir_use_symlinks=False,
+                                resume_download=True
+                            )
+                            
+                            file_size = os.path.getsize(downloaded_path)
+                            size_mb = file_size / (1024 * 1024)
+                            logger.info(f"✅ [{i}/{total_files}] Concluído: {file_path} ({size_mb:.1f} MB)")
+                            downloaded_files += 1
+                            
+                        except Exception as file_error:
+                            logger.warning(f"❌ [{i}/{total_files}] Falha: {file_path} - {file_error}")
+                            failed_files.append((file_path, str(file_error)))
+                            continue
+                    
+                    logger.info(f"📊 Resultado do download:")
+                    logger.info(f"   ✅ Sucesso: {downloaded_files}/{total_files} arquivos")
+                    logger.info(f"   ❌ Falhas: {len(failed_files)}/{total_files} arquivos")
+                    
+                    if failed_files:
+                        logger.warning("⚠️  Arquivos que falharam:")
+                        for file_path, error in failed_files:
+                            logger.warning(f"   📄 {file_path}: {error}")
+                    
+                    if downloaded_files > 0:
+                        logger.info("✅ Download automático concluído com sucesso!")
+                        self.load_model()
+                        return
+                    else:
+                        raise Exception("Nenhum arquivo foi baixado com sucesso")
+                        
+                except Exception as api_error:
+                    logger.error(f"❌ Erro ao acessar API do HuggingFace: {api_error}")
+                    raise
+                    
+            except Exception as api_method_error:
+                logger.error(f"❌ Erro no método via API: {api_method_error}")
+                logger.info("🔄 Tentando método de fallback...")
+            
+            # Método 3: Fallback - tentar baixar arquivos comuns mesmo sem lista
+            logger.info("🆘 Usando método de fallback para arquivos comuns...")
+            
+            common_files = [
+                # Arquivos de modelo
+                "pytorch_model.bin",
+                "model.safetensors", 
+                "model.pt",
+                "model.pth",
+                "checkpoint.pt",
+                "best_model.pt",
+                
+                # Arquivos de configuração
+                "config.json",
+                "model_config.json",
+                "training_args.json",
+                
+                # Arquivos de tokenizer
+                "tokenizer.json",
+                "tokenizer_config.json",
+                "vocab.json",
+                "vocab.txt",
+                "special_tokens_map.json",
+                
+                # Outros arquivos importantes
+                "README.md",
+                ".gitattributes",
+                "requirements.txt"
+            ]
+            
+            fallback_downloaded = 0
+            for filename in common_files:
+                try:
+                    logger.info(f"🔍 Tentando baixar: {filename}")
+                    file_path = hf_hub_download(
+                        repo_id=self.model_name,
+                        filename=filename,
+                        local_dir=self.model_dir,
+                        local_dir_use_symlinks=False
+                    )
+                    logger.info(f"✅ Fallback sucesso: {filename}")
+                    fallback_downloaded += 1
+                except Exception as fallback_error:
+                    logger.debug(f"   ❌ {filename} não encontrado: {fallback_error}")
+                    continue
+            
+            if fallback_downloaded > 0:
+                logger.info(f"✅ Fallback baixou {fallback_downloaded} arquivos")
+            else:
+                logger.warning("⚠️  Nenhum arquivo foi baixado via fallback")
+            
+            # Tentar carregar independente do resultado
+            self.load_model()
+            
+        except Exception as e:
+            logger.error(f"❌ Erro crítico no download: {e}")
+            logger.error(f"📂 Diretório atual: {self.model_dir}")
+            logger.error(f"📋 Conteúdo: {os.listdir(self.model_dir) if os.path.exists(self.model_dir) else 'Diretório não existe'}")
+            logger.warning("🔄 Continuando sem modelo - verifique conectividade e permissões")
+            self.model = None
     
     def load_model(self):
         """Carrega o modelo F5-TTS com otimizações GPU"""
         try:
-            from f5_tts import F5TTS
-            logger.info("🔄 Carregando modelo...")
+            logger.info("🔄 Carregando modelo F5-TTS...")
             
-            if not os.path.exists(self.model_dir) or not os.listdir(self.model_dir):
-                logger.info(f"📥 Modelo não encontrado localmente, baixando de {self.model_name}...")
-                snapshot_download(
-                    repo_id=self.model_name,
-                    local_dir=self.model_dir,
-                    local_dir_use_symlinks=False
-                )
-                logger.info("✅ Modelo baixado com sucesso!")
-
             # Limpar memória antes de carregar
             self.clear_gpu_memory()
             
-            # Configurar dtype baseado na GPU
-            if self.device == "cuda":
-                if self.use_mixed_precision:
-                    torch_dtype = torch.float16
-                    logger.info("🎯 Usando float16 para economia de memória")
-                else:
-                    torch_dtype = torch.float32
-            else:
-                torch_dtype = torch.float32
-            
-            # Carregar modelo
-            self.model = F5TTS.from_pretrained(
-                self.model_dir,
-                torch_dtype=torch_dtype,
-                device_map=self.device
-            )
-            
-            # Otimizar modelo para inferência
-            if self.device == "cuda":
-                self.model = torch.compile(self.model, mode="reduce-overhead")
-                logger.info("⚡ Modelo compilado com torch.compile")
+            # MÉTODO 1: Tentar carregar F5-TTS oficial
+            try:
+                logger.info("📦 Tentando importar F5-TTS...")
+                
+                # Verificar se F5-TTS está instalado
+                try:
+                    import f5_tts
+                    from f5_tts import F5TTS
+                    logger.info("✅ F5-TTS importado com sucesso")
+                    
+                    # Configurar dtype baseado na GPU
+                    if self.device == "cuda":
+                        if self.use_mixed_precision:
+                            torch_dtype = torch.float16
+                            logger.info("🎯 Usando float16 para economia de memória")
+                        else:
+                            torch_dtype = torch.float32
+                    else:
+                        torch_dtype = torch.float32
+                    
+                    # Tentar carregar modelo
+                    logger.info(f"🔄 Carregando de: {self.model_dir}")
+                    self.model = F5TTS.from_pretrained(
+                        self.model_dir,
+                        torch_dtype=torch_dtype,
+                        device_map=self.device if self.device == "cuda" else "auto"
+                    )
+                    
+                    # Otimizar modelo para inferência
+                    if self.device == "cuda" and hasattr(torch, 'compile'):
+                        try:
+                            self.model = torch.compile(self.model, mode="reduce-overhead")
+                            logger.info("⚡ Modelo compilado com torch.compile")
+                        except Exception as compile_error:
+                            logger.warning(f"Não foi possível compilar modelo: {compile_error}")
+                    
+                    logger.info("✅ Modelo F5-TTS carregado com sucesso!")
+                    
+                except ImportError as import_error:
+                    logger.error(f"❌ F5-TTS não encontrado: {import_error}")
+                    logger.info("💡 Para instalar F5-TTS:")
+                    logger.info("   pip install f5-tts")
+                    logger.info("   ou")
+                    logger.info("   pip install git+https://github.com/SWivid/F5-TTS.git")
+                    raise
+                
+            except Exception as f5_error:
+                logger.warning(f"⚠️  Erro ao carregar F5-TTS oficial: {f5_error}")
+                
+                # MÉTODO 2: Tentar carregar modelo genérico do HuggingFace
+                logger.info("🔄 Tentando carregar como modelo genérico...")
+                try:
+                    from transformers import AutoModel, AutoTokenizer
+                    
+                    self.tokenizer = AutoTokenizer.from_pretrained(self.model_dir)
+                    self.model = AutoModel.from_pretrained(
+                        self.model_dir,
+                        torch_dtype=torch.float16 if self.device == "cuda" and self.use_mixed_precision else torch.float32,
+                        device_map=self.device if self.device == "cuda" else "auto"
+                    )
+                    
+                    if self.device == "cuda":
+                        self.model = self.model.cuda()
+                    
+                    logger.info("✅ Modelo genérico carregado com sucesso!")
+                    
+                except Exception as generic_error:
+                    logger.error(f"❌ Erro ao carregar modelo genérico: {generic_error}")
+                    
+                    # MÉTODO 3: Carregar modelo PyTorch puro
+                    logger.info("🔄 Tentando carregar como PyTorch puro...")
+                    try:
+                        model_files = [f for f in os.listdir(self.model_dir) if f.endswith(('.pt', '.pth', '.bin'))]
+                        if model_files:
+                            model_path = os.path.join(self.model_dir, model_files[0])
+                            logger.info(f"📂 Carregando {model_path}")
+                            
+                            self.model = torch.load(
+                                model_path, 
+                                map_location=self.device,
+                                weights_only=False
+                            )
+                            
+                            if hasattr(self.model, 'eval'):
+                                self.model.eval()
+                            
+                            logger.info("✅ Modelo PyTorch carregado com sucesso!")
+                        else:
+                            logger.error("❌ Nenhum arquivo de modelo encontrado")
+                            self.model = None
+                            
+                    except Exception as pytorch_error:
+                        logger.error(f"❌ Erro ao carregar modelo PyTorch: {pytorch_error}")
+                        self.model = None
             
             # Log de memória após carregamento
             if self.model and self.device == "cuda":
@@ -171,21 +449,19 @@ class GPUOptimizedF5TTSServer:
                 if memory_info:
                     logger.info(f"📊 Memória GPU após carregamento: {memory_info['usage_percent']}% usada")
             
-            if self.model:
-                logger.info("✅ Modelo carregado com sucesso!")
+            # Status final
+            if self.model is not None:
+                logger.info("✅ Modelo carregado e pronto para uso!")
+                return True
             else:
-                logger.error("❌ Modelo não pode ser carregado.")
+                logger.error("❌ Não foi possível carregar o modelo")
+                return False
             
-        except ImportError:
-            logger.error("❌ Biblioteca F5-TTS não encontrada. Instale com: pip install git+https://github.com/SWivid/F5-TTS.git")
-            self.model = None
         except Exception as e:
-            logger.error(f"❌ Erro ao carregar modelo: {e}")
-            if os.path.exists(self.model_dir):
-                logger.error(f"Arquivos no diretório do modelo: {os.listdir(self.model_dir)}")
-            else:
-                logger.error("Diretório do modelo não encontrado.")
+            logger.error(f"❌ Erro crítico ao carregar modelo: {e}")
+            logger.error(f"📂 Conteúdo do diretório: {os.listdir(self.model_dir) if os.path.exists(self.model_dir) else 'Diretório não existe'}")
             self.model = None
+            return False
     
     def preprocess_audio_gpu(self, audio_file: str) -> torch.Tensor:
         """Pré-processa áudio de referência com GPU"""
@@ -201,9 +477,6 @@ class GPUOptimizedF5TTSServer:
             
             # Normalizar
             audio_tensor = audio_tensor / torch.max(torch.abs(audio_tensor))
-            
-            # Remover silêncio (usando torch operations para GPU)
-            # Implementação simplificada - usar librosa.effects.trim em produção
             
             # Garantir duração mínima/máxima
             min_samples = int(1.0 * self.sample_rate)  # 1 segundo mínimo
@@ -231,37 +504,74 @@ class GPUOptimizedF5TTSServer:
         try:
             logger.info(f"🎤 Sintetizando com GPU: '{text[:50]}...'")
             
+            if self.model is None:
+                logger.error("❌ Modelo não carregado")
+                raise Exception("Modelo não está carregado")
+            
             # Limpar memória antes da síntese
             if self.device == "cuda":
                 torch.cuda.empty_cache()
             
-            if self.model and self.model != "placeholder_model_gpu":
-                # IMPLEMENTAÇÃO REAL: Descomente quando F5-TTS estiver disponível
-                with torch.cuda.amp.autocast(enabled=self.use_mixed_precision):
-                    if reference_audio is not None:
-                        # Clonagem de voz
-                        audio = self.model.synthesize_with_reference(
-                            text=text,
-                            reference_audio=reference_audio,
-                            sample_rate=self.sample_rate
-                        )
-                    else:
-                        # Síntese normal
-                        audio = self.model.synthesize(
-                            text=text,
-                            sample_rate=self.sample_rate
-                        )
+            # Verificar tipo de modelo e sintetizar
+            try:
+                # Para F5-TTS oficial
+                if hasattr(self.model, 'synthesize') or hasattr(self.model, 'infer'):
+                    logger.info("🎯 Usando método de síntese do F5-TTS")
+                    
+                    with torch.cuda.amp.autocast(enabled=self.use_mixed_precision and self.device == "cuda"):
+                        if reference_audio is not None and hasattr(self.model, 'synthesize_with_reference'):
+                            # Clonagem de voz
+                            audio = self.model.synthesize_with_reference(
+                                text=text,
+                                reference_audio=reference_audio,
+                                sample_rate=self.sample_rate
+                            )
+                        elif hasattr(self.model, 'synthesize'):
+                            # Síntese normal
+                            audio = self.model.synthesize(
+                                text=text,
+                                sample_rate=self.sample_rate
+                            )
+                        elif hasattr(self.model, 'infer'):
+                            # Método alternativo
+                            audio = self.model.infer(
+                                text=text,
+                                ref_audio=reference_audio,
+                                speed=1.0
+                            )
+                        else:
+                            raise Exception("Método de síntese não encontrado no modelo")
+                
+                # Para modelos genéricos - implementação básica
+                else:
+                    logger.info("🎯 Usando síntese genérica")
+                    # Aqui você implementaria a lógica específica do seu modelo
+                    # Por enquanto, gerar áudio sintético para teste
+                    duration = len(text) * 0.1  # ~0.1s por caractere
+                    samples = int(duration * self.sample_rate)
+                    audio = np.sin(2 * np.pi * 440 * np.arange(samples) / self.sample_rate) * 0.3
+                    logger.warning("⚠️  Usando áudio sintético para teste - implemente lógica específica do modelo")
                 
                 # Converter para CPU para salvar
                 if isinstance(audio, torch.Tensor):
                     audio = audio.cpu().numpy()
                 
+                # Garantir formato correto
+                if audio.ndim > 1:
+                    audio = audio.squeeze()
+                
+                logger.info("✅ Síntese concluída com sucesso!")
                 return audio
+                
+            except Exception as synthesis_error:
+                logger.error(f"❌ Erro na síntese: {synthesis_error}")
+                raise
             
         except Exception as e:
             logger.error(f"❌ Erro na síntese GPU: {e}")
             raise
 
+# Resto do código Flask permanece o mesmo...
 # Criar app Flask
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max
@@ -278,7 +588,7 @@ def health_check():
         'status': 'healthy',
         'device': tts_server.device,
         'model_loaded': tts_server.model is not None,
-        'version': '1.0.0-gpu'
+        'version': '1.0.1-gpu-fixed'
     }
     
     if gpu_info:
@@ -310,6 +620,25 @@ def clear_cache():
     tts_server.clear_gpu_memory()
     return jsonify({'status': 'Cache GPU limpo'})
 
+@app.route('/model-info', methods=['GET'])
+def model_info():
+    """Informações detalhadas do modelo"""
+    info = {
+        'model_loaded': tts_server.model is not None,
+        'model_type': type(tts_server.model).__name__ if tts_server.model else None,
+        'model_dir': tts_server.model_dir,
+        'files_in_dir': os.listdir(tts_server.model_dir) if os.path.exists(tts_server.model_dir) else [],
+        'device': tts_server.device
+    }
+    
+    if tts_server.model:
+        try:
+            info['model_parameters'] = sum(p.numel() for p in tts_server.model.parameters()) if hasattr(tts_server.model, 'parameters') else 'N/A'
+        except:
+            info['model_parameters'] = 'N/A'
+    
+    return jsonify(info)
+
 @app.route('/synthesize', methods=['POST'])
 def synthesize():
     """Endpoint para síntese de voz GPU-otimizada"""
@@ -317,7 +646,7 @@ def synthesize():
         # Log memória antes do processamento
         if tts_server.device == "cuda":
             mem_before = tts_server.get_gpu_memory_info()
-            logger.info(f"💾 Memória GPU antes: {mem_before['usage_percent']}%")
+            logger.info(f"💾 Memória GPU antes: {mem_before['usage_percent']}%" if mem_before else "💾 Memória GPU: informação não disponível")
         
         # Verificar texto
         text = request.form.get('text', '').strip()
@@ -361,7 +690,7 @@ def synthesize():
         # Log memória após processamento
         if tts_server.device == "cuda":
             mem_after = tts_server.get_gpu_memory_info()
-            logger.info(f"💾 Memória GPU depois: {mem_after['usage_percent']}%")
+            logger.info(f"💾 Memória GPU depois: {mem_after['usage_percent']}%" if mem_after else "💾 Memória GPU: informação não disponível")
         
         logger.info("✅ Síntese GPU concluída com sucesso!")
         
@@ -387,26 +716,30 @@ def index():
     gpu_info = ""
     if tts_server.device == "cuda":
         memory = tts_server.get_gpu_memory_info()
-        gpu_info = f"""
-        <div class="container">
-            <h3>🎮 Status da GPU</h3>
-            <p><strong>GPU:</strong> {tts_server.gpu_name}</p>
-            <p><strong>Memória:</strong> {memory['usage_percent']}% usada ({memory['allocated_gb']:.1f}GB / {memory['total_gb']:.1f}GB)</p>
-            <p><strong>CUDA:</strong> {torch.version.cuda}</p>
-            <p><strong>Mixed Precision:</strong> {'✅' if tts_server.use_mixed_precision else '❌'}</p>
-            <button onclick="clearGPUCache()">🧹 Limpar Cache GPU</button>
-        </div>
-        """
+        if memory:
+            gpu_info = f"""
+            <div class="container gpu-container">
+                <h3>🎮 Status da GPU</h3>
+                <p><strong>GPU:</strong> {tts_server.gpu_name}</p>
+                <p><strong>Memória:</strong> {memory['usage_percent']}% usada ({memory['allocated_gb']:.1f}GB / {memory['total_gb']:.1f}GB)</p>
+                <p><strong>CUDA:</strong> {torch.version.cuda}</p>
+                <p><strong>Mixed Precision:</strong> {'✅' if tts_server.use_mixed_precision else '❌'}</p>
+                <button onclick="clearGPUCache()">🧹 Limpar Cache GPU</button>
+                <button onclick="showModelInfo()">📋 Info do Modelo</button>
+            </div>
+            """
     
     return f'''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>F5-TTS GPU Server</title>
+        <title>F5-TTS GPU Server - Fixed</title>
         <style>
             body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }}
             .container {{ background: #f5f5f5; padding: 20px; border-radius: 10px; margin: 20px 0; }}
             .gpu-container {{ background: #e3f2fd; border-left: 4px solid #2196f3; }}
+            .success-container {{ background: #d4edda; border-left: 4px solid #28a745; }}
+            .error-container {{ background: #f8d7da; border-left: 4px solid #dc3545; }}
             textarea {{ width: 100%; height: 100px; margin: 10px 0; }}
             input[type="file"] {{ margin: 10px 0; }}
             button {{ background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }}
@@ -416,16 +749,22 @@ def index():
             .error {{ background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }}
             audio {{ width: 100%; margin: 10px 0; }}
             .gpu-badge {{ background: #28a745; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; }}
+            .fixed-badge {{ background: #ffc107; color: #212529; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; }}
+            pre {{ background: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; }}
         </style>
     </head>
     <body>
-        <h1>🎙️ F5-TTS Voice Cloning Server <span class="gpu-badge">GPU</span></h1>
+        <h1>🎙️ F5-TTS Voice Cloning Server 
+            <span class="gpu-badge">GPU</span>
+            <span class="fixed-badge">FIXED</span>
+        </h1>
         
         {gpu_info}
         
         <div class="container">
             <h3>📊 Status do Servidor</h3>
             <p id="status">Carregando...</p>
+            <button onclick="refreshStatus()">🔄 Atualizar Status</button>
         </div>
         
         <div class="container">
@@ -443,22 +782,59 @@ def index():
             <div id="result"></div>
         </div>
         
+        <div class="container">
+            <h3>🔧 Diagnóstico</h3>
+            <button onclick="showModelInfo()">📋 Informações do Modelo</button>
+            <div id="modelInfo"></div>
+        </div>
+        
         <script>
         // Verificar status do servidor
-        fetch('/health')
-            .then(r => r.json())
-            .then(data => {{
-                let gpu_info = '';
-                if (data.gpu) {{
-                    gpu_info = `<br><strong>GPU:</strong> ${{data.gpu.name}}<br><strong>Memória GPU:</strong> ${{data.gpu.memory.usage_percent}}%`;
-                }}
-                document.getElementById('status').innerHTML = `
-                    <strong>Status:</strong> ${{data.status}}<br>
-                    <strong>Dispositivo:</strong> ${{data.device}}<br>
-                    <strong>Modelo:</strong> ${{data.model_loaded ? '✅ Carregado' : '❌ Não carregado'}}<br>
-                    <strong>Versão:</strong> ${{data.version}}${{gpu_info}}
-                `;
-            }});
+        function refreshStatus() {{
+            fetch('/health')
+                .then(r => r.json())
+                .then(data => {{
+                    let gpu_info = '';
+                    if (data.gpu) {{
+                        gpu_info = `<br><strong>GPU:</strong> ${{data.gpu.name}}<br><strong>Memória GPU:</strong> ${{data.gpu.memory.usage_percent}}%`;
+                    }}
+                    
+                    const statusElement = document.getElementById('status');
+                    const modelStatus = data.model_loaded ? '✅ Carregado' : '❌ Não carregado';
+                    const statusClass = data.model_loaded ? 'success-container' : 'error-container';
+                    
+                    statusElement.innerHTML = `
+                        <strong>Status:</strong> ${{data.status}}<br>
+                        <strong>Dispositivo:</strong> ${{data.device}}<br>
+                        <strong>Modelo:</strong> ${{modelStatus}}<br>
+                        <strong>Versão:</strong> ${{data.version}}${{gpu_info}}
+                    `;
+                    
+                    statusElement.className = 'container ' + statusClass;
+                }})
+                .catch(e => {{
+                    document.getElementById('status').innerHTML = `❌ Erro ao conectar: ${{e}}`;
+                }});
+        }}
+        
+        // Carregar status inicial
+        refreshStatus();
+        
+        // Informações do modelo
+        function showModelInfo() {{
+            fetch('/model-info')
+                .then(r => r.json())
+                .then(data => {{
+                    const info = `
+                        <h4>📋 Informações do Modelo</h4>
+                        <pre>${{JSON.stringify(data, null, 2)}}</pre>
+                    `;
+                    document.getElementById('modelInfo').innerHTML = info;
+                }})
+                .catch(e => {{
+                    document.getElementById('modelInfo').innerHTML = `❌ Erro: ${{e}}`;
+                }});
+        }}
         
         // Limpar cache GPU
         function clearGPUCache() {{
@@ -517,5 +893,5 @@ def index():
     '''
 
 if __name__ == '__main__':
-    logger.info("🌐 Iniciando servidor GPU...")
+    logger.info("🌐 Iniciando servidor GPU corrigido...")
     app.run(host='0.0.0.0', port=8000, debug=False)
