@@ -171,32 +171,32 @@ class GPUOptimizedF5TTSServer:
             self.clear_gpu_memory()
             
             # IMPLEMENTAÇÃO REAL: Descomente quando F5-TTS estiver disponível
-            # from f5_tts import F5TTS
-            # 
-            # # Configurar dtype baseado na GPU
-            # if self.device == "cuda":
-            #     if self.use_mixed_precision:
-            #         torch_dtype = torch.float16
-            #         logger.info("🎯 Usando float16 para economia de memória")
-            #     else:
-            #         torch_dtype = torch.float32
-            # else:
-            #     torch_dtype = torch.float32
-            # 
-            # # Carregar modelo
-            # self.model = F5TTS.from_pretrained(
-            #     self.model_dir,
-            #     torch_dtype=torch_dtype,
-            #     device_map=self.device
-            # )
-            # 
-            # # Otimizar modelo para inferência
-            # if self.device == "cuda":
-            #     self.model = torch.compile(self.model, mode="reduce-overhead")
-            #     logger.info("⚡ Modelo compilado com torch.compile")
+            from f5_tts import F5TTS
+            
+            # Configurar dtype baseado na GPU
+            if self.device == "cuda":
+                if self.use_mixed_precision:
+                    torch_dtype = torch.float16
+                    logger.info("🎯 Usando float16 para economia de memória")
+                else:
+                    torch_dtype = torch.float32
+            else:
+                torch_dtype = torch.float32
+            
+            # Carregar modelo
+            self.model = F5TTS.from_pretrained(
+                self.model_dir,
+                torch_dtype=torch_dtype,
+                device_map=self.device
+            )
+            
+            # Otimizar modelo para inferência
+            if self.device == "cuda":
+                self.model = torch.compile(self.model, mode="reduce-overhead")
+                logger.info("⚡ Modelo compilado com torch.compile")
             
             # Para demonstração, usar placeholder
-            self.model = "placeholder_model_gpu"
+            # self.model = "placeholder_model_gpu"
             
             # Log de memória após carregamento
             if self.device == "cuda":
@@ -259,123 +259,26 @@ class GPUOptimizedF5TTSServer:
             
             if self.model and self.model != "placeholder_model_gpu":
                 # IMPLEMENTAÇÃO REAL: Descomente quando F5-TTS estiver disponível
-                # with torch.cuda.amp.autocast(enabled=self.use_mixed_precision):
-                #     if reference_audio is not None:
-                #         # Clonagem de voz
-                #         audio = self.model.synthesize_with_reference(
-                #             text=text,
-                #             reference_audio=reference_audio,
-                #             sample_rate=self.sample_rate
-                #         )
-                #     else:
-                #         # Síntese normal
-                #         audio = self.model.synthesize(
-                #             text=text,
-                #             sample_rate=self.sample_rate
-                #         )
-                # 
-                # # Converter para CPU para salvar
-                # if isinstance(audio, torch.Tensor):
-                #     audio = audio.cpu().numpy()
-                # 
-                # return audio
-                pass
-            
-            # SIMULAÇÃO GPU-otimizada para demonstração
-            logger.info("🔄 Gerando áudio simulado com aceleração GPU...")
-            
-            # Usar GPU para cálculos se disponível
-            duration = max(2.0, len(text) * 0.08)
-            n_samples = int(self.sample_rate * duration)
-            
-            if self.device == "cuda":
-                # Gerar no GPU
-                t = torch.linspace(0, duration, n_samples, device='cuda')
+                with torch.cuda.amp.autocast(enabled=self.use_mixed_precision):
+                    if reference_audio is not None:
+                        # Clonagem de voz
+                        audio = self.model.synthesize_with_reference(
+                            text=text,
+                            reference_audio=reference_audio,
+                            sample_rate=self.sample_rate
+                        )
+                    else:
+                        # Síntese normal
+                        audio = self.model.synthesize(
+                            text=text,
+                            sample_rate=self.sample_rate
+                        )
                 
-                # Frequência base
-                base_freq = 150.0
+                # Converter para CPU para salvar
+                if isinstance(audio, torch.Tensor):
+                    audio = audio.cpu().numpy()
                 
-                # Se há referência, analisar no GPU
-                if reference_audio is not None:
-                    # Análise FFT no GPU
-                    ref_fft = torch.fft.rfft(reference_audio)
-                    dominant_freq_idx = torch.argmax(torch.abs(ref_fft))
-                    estimated_pitch = float(dominant_freq_idx * self.sample_rate / (2 * len(ref_fft)))
-                    base_freq = max(80.0, min(400.0, estimated_pitch))
-                    logger.info(f"🎯 Pitch estimado (GPU): {base_freq:.1f} Hz")
-                
-                # Gerar sinal no GPU
-                audio = torch.zeros_like(t)
-                
-                # Componente fundamental
-                audio += 0.3 * torch.sin(2 * np.pi * base_freq * t)
-                
-                # Harmônicos
-                for harm in [2, 3, 4, 5]:
-                    amplitude = 0.1 / harm
-                    audio += amplitude * torch.sin(2 * np.pi * base_freq * harm * t)
-                
-                # Modulação
-                vibrato_freq = 4.5
-                vibrato_depth = 0.02
-                vibrato = 1 + vibrato_depth * torch.sin(2 * np.pi * vibrato_freq * t)
-                audio *= vibrato
-                
-                # Envelope
-                fade_samples = int(0.1 * self.sample_rate)
-                if len(audio) > 2 * fade_samples:
-                    fade_in = torch.linspace(0, 1, fade_samples, device='cuda')
-                    fade_out = torch.linspace(1, 0, fade_samples, device='cuda')
-                    audio[:fade_samples] *= fade_in
-                    audio[-fade_samples:] *= fade_out
-                
-                # Ruído no GPU
-                noise = torch.randn_like(audio) * 0.01
-                audio += noise
-                
-                # Normalizar
-                audio = audio / torch.max(torch.abs(audio)) * 0.8
-                
-                # Converter para CPU/numpy
-                audio = audio.cpu().numpy().astype(np.float32)
-                
-            else:
-                # Fallback para CPU (código original)
-                t = np.linspace(0, duration, n_samples)
-                base_freq = 150
-                
-                if reference_audio is not None:
-                    ref_audio_np = reference_audio.cpu().numpy() if isinstance(reference_audio, torch.Tensor) else reference_audio
-                    ref_fft = np.fft.rfft(ref_audio_np)
-                    dominant_freq_idx = np.argmax(np.abs(ref_fft))
-                    estimated_pitch = dominant_freq_idx * self.sample_rate / (2 * len(ref_fft))
-                    base_freq = max(80, min(400, estimated_pitch))
-                
-                audio = np.zeros_like(t)
-                audio += 0.3 * np.sin(2 * np.pi * base_freq * t)
-                
-                for harm in [2, 3, 4, 5]:
-                    amplitude = 0.1 / harm
-                    audio += amplitude * np.sin(2 * np.pi * base_freq * harm * t)
-                
-                vibrato = 1 + 0.02 * np.sin(2 * np.pi * 4.5 * t)
-                audio *= vibrato
-                
-                fade_samples = int(0.1 * self.sample_rate)
-                if len(audio) > 2 * fade_samples:
-                    audio[:fade_samples] *= np.linspace(0, 1, fade_samples)
-                    audio[-fade_samples:] *= np.linspace(1, 0, fade_samples)
-                
-                noise = np.random.normal(0, 0.01, len(audio))
-                audio += noise
-                audio = (audio / np.max(np.abs(audio)) * 0.8).astype(np.float32)
-            
-            # Limpar memória após síntese
-            if self.device == "cuda":
-                torch.cuda.empty_cache()
-            
-            logger.info("✅ Síntese GPU concluída!")
-            return audio
+                return audio
             
         except Exception as e:
             logger.error(f"❌ Erro na síntese GPU: {e}")

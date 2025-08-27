@@ -52,7 +52,7 @@ RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Tentar instalar F5-TTS
-RUN pip install --no-cache-dir git+https://github.com/SWivid/F5-TTS.git || echo "F5-TTS não disponível - usando simulação"
+RUN pip install --no-cache-dir git+https://github.com/SWivid/F5-TTS.git
 
 # Copiar código da aplicação
 COPY server.py server.py
